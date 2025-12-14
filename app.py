@@ -1,26 +1,57 @@
-import streamlit as st
+import os
 import numpy as np
 import pandas as pd
+import streamlit as st
 import joblib
+import gdown
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-# ------------------------
-# Load models
-# ------------------------
-lr = joblib.load('lr_model.pkl')
-rf = joblib.load('rf_model.pkl')
-scaler = joblib.load('scaler.pkl')
-
-csv_url = (
-    "https://drive.usercontent.google.com/download"
-    "?id=1Lrg8l73vJcVFSkdbAJsgQceJlM1wW1Xn"
-    "&export=download"
+# --------------------------------------------------
+# Page configuration
+# --------------------------------------------------
+st.set_page_config(
+    page_title="Credit Card Fraud Detection",
+    layout="wide"
 )
 
-try:
-    # Auto-detect delimiter safely
-    df = pd.read_csv(csv_url, sep=None, engine="python")
+st.title("💳 Credit Card Fraud Detection System")
+st.markdown("""
+This app compares **Logistic Regression** and **Random Forest** models  
+for detecting **credit card fraud**.
+
+The dataset is downloaded **securely at runtime** to keep the repository lightweight.
+""")
+
+st.divider()
+
+# --------------------------------------------------
+# Load models
+# --------------------------------------------------
+@st.cache_resource
+def load_models():
+    lr_model = joblib.load("lr_model.pkl")
+    rf_model = joblib.load("rf_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+    return lr_model, rf_model, scaler
+
+lr_model, rf_model, scaler = load_models()
+
+# --------------------------------------------------
+# Download & load dataset from Google Drive
+# --------------------------------------------------
+@st.cache_data
+def load_dataset():
+    FILE_ID = "1Lrg8l73vJcVFSkdbAJsgQceJlM1wW1Xn"
+    CSV_PATH = "creditcard_runtime.csv"
+
+    if not os.path.exists(CSV_PATH):
+        gdown.download(
+            f"https://drive.google.com/uc?id={FILE_ID}",
+            CSV_PATH,
+            quiet=False
+        )
+
+    df = pd.read_csv(CSV_PATH)
 
     expected_columns = [
         'Time','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13',
@@ -29,115 +60,114 @@ try:
     ]
 
     if df.shape[1] != 31:
-        st.error(
-            f"❌ Invalid dataset format: "
-            f"found {df.shape[1]} columns, expected 31."
-        )
+        st.error(f"Invalid dataset format: found {df.shape[1]} columns, expected 31.")
         st.stop()
 
     df.columns = expected_columns
+    return df
 
-except Exception as e:
-    st.error("❌ Failed to load credit card dataset from Google Drive.")
-    st.exception(e)
-    st.stop()
-
+df = load_dataset()
 fraud_samples = df[df["Class"] == 1].reset_index(drop=True)
-# ------------------------
-# Page config
-# ------------------------
-st.set_page_config(page_title="Credit Card Fraud Detection", layout="wide")
-st.title("💳 Credit Card Fraud Detection System")
-st.markdown("""
-This interactive app predicts whether a credit card transaction is **fraudulent** or **legitimate**.
-You can compare **Logistic Regression** and **Random Forest** models.
-Use example fraud transactions or simulate your own.
-""")
 
-st.divider()
+st.success(f"Dataset loaded successfully: {df.shape}")
 
-# ------------------------
-# Model selection
-# ------------------------
-model_name = st.selectbox("Select Model for Prediction", ["Logistic Regression", "Random Forest"])
-model = lr if model_name == "Logistic Regression" else rf
-
-# ------------------------
-# Sidebar inputs
-# ------------------------
+# --------------------------------------------------
+# Sidebar controls
+# --------------------------------------------------
 st.sidebar.header("🧾 Transaction Input")
-st.sidebar.markdown("Adjust values or select an example fraud transaction.")
+
+model_choice = st.sidebar.radio(
+    "Choose Model",
+    ["Logistic Regression", "Random Forest"]
+)
 
 use_example = st.sidebar.checkbox("Use Example Fraud Transaction")
+
 if use_example:
-    idx = st.sidebar.selectbox("Select Example Fraud Transaction", fraud_samples.index)
+    idx = st.sidebar.selectbox(
+        "Select Fraud Example",
+        fraud_samples.index
+    )
     row = fraud_samples.loc[idx]
-    time = row['Time']
-    V_features = row[['V'+str(i) for i in range(1,29)]].tolist()
-    amount = row['Amount']
+    time = row["Time"]
+    V_values = [row[f"V{i}"] for i in range(1, 29)]
+    amount = row["Amount"]
 else:
-    time = st.sidebar.number_input("Seconds since first transaction", min_value=0.0, value=100000.0)
-    
-    st.sidebar.subheader("🔐 Anonymized Transaction Patterns (V1-V28)")
-    st.sidebar.caption("These sliders represent PCA components of transaction patterns.")
-    V_features = []
-    for i in range(1,29):
-        V_features.append(st.sidebar.slider(f"Pattern V{i}", -10.0, 10.0, 0.0))
-    
-    amount = st.sidebar.number_input("Amount (in currency units)", min_value=0.0, value=100.0)
+    time = st.sidebar.number_input(
+        "Seconds Since First Transaction",
+        min_value=0.0,
+        value=100000.0
+    )
 
-# ------------------------
-# Scale features
-# ------------------------
+    st.sidebar.subheader("🔐 Transaction Pattern Components (V1–V28)")
+    st.sidebar.caption(
+        "These sliders represent anonymized PCA-based transaction features."
+    )
+
+    V_values = [
+        st.sidebar.slider(f"V{i}", -10.0, 10.0, 0.0)
+        for i in range(1, 29)
+    ]
+
+    amount = st.sidebar.number_input(
+        "Transaction Amount",
+        min_value=0.0,
+        value=100.0
+    )
+
+# --------------------------------------------------
+# Prepare input
+# --------------------------------------------------
 amount_scaled = scaler.transform([[amount]])[0][0]
-X = np.array([time] + V_features + [amount_scaled]).reshape(1, -1)
+X = np.array([time] + V_values + [amount_scaled]).reshape(1, -1)
 
-# ------------------------
+# --------------------------------------------------
 # Prediction
-# ------------------------
-if st.button("Predict"):
-    lr_pred = lr.predict(X)[0]
-    lr_prob = lr.predict_proba(X)[0][1]
-    rf_pred = rf.predict(X)[0]
-    rf_prob = rf.predict_proba(X)[0][1]
+# --------------------------------------------------
+if st.button("🔍 Predict Fraud"):
+    lr_pred = lr_model.predict(X)[0]
+    lr_prob = lr_model.predict_proba(X)[0][1]
+
+    rf_pred = rf_model.predict(X)[0]
+    rf_prob = rf_model.predict_proba(X)[0][1]
 
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("Logistic Regression")
-        st.metric("Prediction", "Fraud 🚨" if lr_pred==1 else "Legitimate ✅")
+        st.metric(
+            "Prediction",
+            "Fraud 🚨" if lr_pred == 1 else "Legitimate ✅"
+        )
         st.metric("Fraud Probability", f"{lr_prob:.2%}")
-    
+
     with col2:
         st.subheader("Random Forest")
-        st.metric("Prediction", "Fraud 🚨" if rf_pred==1 else "Legitimate ✅")
+        st.metric(
+            "Prediction",
+            "Fraud 🚨" if rf_pred == 1 else "Legitimate ✅"
+        )
         st.metric("Fraud Probability", f"{rf_prob:.2%}")
 
-    # ------------------------
+    st.divider()
+
+    # --------------------------------------------------
     # Visualizations
-    # ------------------------
-    st.subheader("Transaction Insights")
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        st.markdown("**Transaction Amount Distribution**")
-        fig, ax = plt.subplots()
-        sns.histplot(df['Amount'], bins=50, kde=True, color='skyblue')
-        ax.axvline(amount, color='red', linestyle='--', label='Current Transaction')
-        ax.set_xlabel("Amount")
-        ax.set_ylabel("Count")
-        ax.legend()
-        st.pyplot(fig)
-    
-    with col4:
-        st.markdown("**Fraud Probability Comparison**")
-        fig2, ax2 = plt.subplots()
-        models = ['Logistic Regression', 'Random Forest']
-        probs = [lr_prob, rf_prob]
-        sns.barplot(x=models, y=probs, palette='Reds')
-        ax2.set_ylim(0,1)
-        ax2.set_ylabel("Fraud Probability")
-        st.pyplot(fig2)
-    
-    st.info("Red line in histogram shows your transaction amount. Bar chart shows predicted fraud probabilities from both models.")
+    # --------------------------------------------------
+    st.subheader("📊 Model Insight")
+
+    fig, ax = plt.subplots()
+    ax.bar(
+        ["Logistic Regression", "Random Forest"],
+        [lr_prob, rf_prob]
+    )
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("Fraud Probability")
+    ax.set_title("Model Probability Comparison")
+
+    st.pyplot(fig)
+
+    st.info(
+        "Logistic Regression reacts strongly to extreme values, "
+        "while Random Forest is more conservative and relies on learned patterns."
+    )
