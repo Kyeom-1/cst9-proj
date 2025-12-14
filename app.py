@@ -16,15 +16,35 @@ scaler = joblib.load('scaler.pkl')
 # Load dataset from Google Drive
 # ------------------------
 csv_url = "https://drive.usercontent.google.com/download?id=1b-LDt5p10Q-GD1aRl0rfYX6vcleQqoWg&export=download&authuser=0"
-df = pd.read_csv(csv_url)
 
-expected_columns = ['Time','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13',
-                    'V14','V15','V16','V17','V18','V19','V20','V21','V22','V23','V24','V25','V26','V27','V28',
-                    'Amount','Class']
-df.columns = expected_columns
+try:
+    df = pd.read_csv(csv_url)
+
+    expected_columns = [
+        'Time','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13',
+        'V14','V15','V16','V17','V18','V19','V20','V21','V22','V23','V24','V25',
+        'V26','V27','V28','Amount','Class'
+    ]
+
+    # Case 1: correct number of columns → rename safely
+    if df.shape[1] == len(expected_columns):
+        df.columns = expected_columns
+
+    # Case 2: extra unnamed index column → drop it
+    elif df.shape[1] == len(expected_columns) + 1:
+        df = df.iloc[:, 1:]
+        df.columns = expected_columns
+
+    else:
+        st.error(f"Unexpected CSV format. Found {df.shape[1]} columns.")
+        st.stop()
+
+except Exception as e:
+    st.error("Could not load dataset from Google Drive.")
+    st.exception(e)
+    st.stop()
 
 fraud_samples = df[df['Class'] == 1].reset_index(drop=True)
-
 # ------------------------
 # Page config
 # ------------------------
