@@ -18,7 +18,7 @@ scaler = joblib.load('scaler.pkl')
 csv_url = "https://drive.usercontent.google.com/download?id=1b-LDt5p10Q-GD1aRl0rfYX6vcleQqoWg&export=download&authuser=0"
 
 try:
-    df = pd.read_csv(csv_url)
+    df = pd.read_csv(csv_url, sep=';')
 
     expected_columns = [
         'Time','V1','V2','V3','V4','V5','V6','V7','V8','V9','V10','V11','V12','V13',
